@@ -114,7 +114,7 @@
       nearest(r, 5).map((c) => '<tr><td>' + esc(c.name) + ' <span class="dim mono">' + esc(c.symbol || '') + '</span></td><td class="n">TVL ' + usd(c.tvl) + '</td><td class="n">mcap ' + usd(c.mcap) + '</td><td class="n mono">' + x(c.mcap / c.tvl) + '</td></tr>').join('') +
       '</tbody></table>' + chart(r) + '</section></div>';
     h += '<section class="card"><h3>Farm plan · ' + esc(p.chain) + ' · <span class="verdict ' + vcls(p.verdict) + '">' + p.verdict + '</span></h3><ol class="steps">' +
-      p.steps.map((s) => '<li>' + esc(s.do) + '<div class="tags"><span class="tag c">Cost: ' + esc(s.cost) + '</span><span class="tag t">Time: ' + esc(s.time) + '</span></div></li>').join('') + '</ol>' +
+      p.steps.map((s) => '<li>' + esc(s.do) + '<div class="tags"><span class="tag ph ' + s.phase.split(' ')[0] + '">' + (s.phase === 'After launch' ? 'After the token' : 'Before · ' + s.phase) + '</span><span class="tag c">Cost: ' + esc(s.cost) + '</span><span class="tag t">Time: ' + esc(s.time) + '</span></div></li>').join('') + '</ol>' +
       '<div class="totals"><div><i>Ticket</i><b>$' + p.ticket.toLocaleString('en-US') + '</b></div><div><i>All fees</i><b>' + M.money(p.cost) + '</b></div><div><i>Hands-on</i><b>' + (p.minutes / 60).toFixed(1) + ' h</b></div><div><i>Hold</i><b>' + p.hold + ' days</b></div><div><i>Expected drop</i><b class="val">' + M.money(p.drop) + '</b></div></div>' +
       '<p class="note">Expected drop = implied value × ' + R.k.airdropShare * 100 + '% to farmers × ticket ÷ launch TVL. Verdict: Farm when the drop is at least 3× all fees, Thin edge at 1–3×, Watch only below. Gas is a typical ' + esc(p.chain) + ' fee of ' + M.money(p.gas) + ' a transaction.</p></section></div>';
     return h;
@@ -138,11 +138,19 @@
   function model() {
     const f = R.fit, gs = Object.keys(R.groups);
     let h = kpis() + '<div class="lab"><section class="card"><h3>The comps: every priced token family, and the line the board is priced on</h3>' + chart(null) +
-      '<p class="note">Each dot is one token family (records joined by CoinGecko id, TVL summed, largest market cap kept) that is not an exchange or chain token and has a market cap of at least $1M. ' + f.trimmed.length + ' families beyond ' + R.k.trimSigma + 'σ were trimmed before the refit: ' + f.trimmed.map((c) => esc(c.name)).join(', ') + '.</p></section><div>';
+      '<p class="note">Each dot is one token family (records joined by ticker, TVL summed, largest market cap kept) that is not an exchange or chain token and has a market cap of at least $1M. ' + f.trimmed.length + ' families beyond ' + R.k.trimSigma + 'σ were trimmed before the refit: ' + f.trimmed.map((c) => esc(c.name)).join(', ') + '.</p></section><div>';
     h += '<section class="card"><h3>Blind test (leave one out)</h3><div class="k"><span>Median miss, fitted model</span><b class="pos">' + x(f.looFit, 2) + '</b><span>Median miss, one flat multiple</span><b>' + x(f.looFlat, 2) + '</b><span>Rank correlation, blind mcap vs actual</span><b>' + f.spearman.toFixed(2) + '</b><span>Scatter σ (log10)</span><b>' + f.sigma.toFixed(3) + '</b><span>Comps used</span><b>' + f.n + '</b></div><p class="note">Each comp is priced by a model fitted without it. The fit misses by ' + x(f.looFit, 2) + ' at the median against ' + x(f.looFlat, 2) + ' for a single median multiple, so size and mechanism carry real information.</p></section>';
-    h += '<section class="card" style="margin-top:16px"><h3>Mechanism effects (shrunk)</h3><table class="mini"><tbody>' + gs.map((g) => { const n = f.comps.filter((c) => c.g === g).length, b = rows.filter((r) => r.group === g).length; return '<tr><td><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + GC[g] + '"></i> ' + gname(g) + '</td><td class="n">' + n + ' comps</td><td class="n">' + b + ' rows</td><td class="n mono">' + x(10 ** (f.g[g] || 0), 2) + '</td></tr>'; }).join('') + '</tbody></table></section>';
-    h += '<section class="card" style="margin-top:16px"><h3>Every constant</h3><div class="k">' + Object.entries(R.k).map(([k, v]) => '<code>' + k + '</code><span>' + v + '</span>').join('') + '</div></section></div></div>';
+    const mech = '<section class="card" style="margin-top:16px"><h3>Mechanism effects (shrunk)</h3><table class="mini"><tbody>' + gs.map((g) => { const n = f.comps.filter((c) => c.g === g).length, b = rows.filter((r) => r.group === g).length; return '<tr><td><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + GC[g] + '"></i> ' + gname(g) + '</td><td class="n">' + n + ' comps</td><td class="n">' + b + ' rows</td><td class="n mono">' + x(10 ** (f.g[g] || 0), 2) + '</td></tr>'; }).join('') + '</tbody></table></section>';
+    h += '<section class="card" style="margin-top:16px"><h3>Levers: move one and the board is rebuilt</h3><div id="lab">' + LEVERS.map(([k, l, a, b, st]) => '<label class="lever">' + l + ' <code>' + k + '</code><input type="range" data-lever="' + k + '" min="' + a + '" max="' + b + '" step="' + st + '" value="' + R.k[k] + '"><b id="lv-' + k + '">' + R.k[k] + '</b></label>').join('') + '</div><div id="labout">' + labOut(R) + '</div></section>' + mech + '</div></div>';
     return h;
+  }
+
+  // The lab re-runs build() with the levers moved and compares the new top 10 with the board's.
+  const LEVERS = [['growthWeight', 'Weight of the 7-day move', 0, 1, 0.05], ['ageFloor', 'Credit for a brand-new protocol', 0.2, 1, 0.05], ['ageFullDays', 'Days to full age credit', 180, 1460, 10], ['shrink', 'Pseudo-comps per mechanism', 0, 20, 1], ['airdropShare', 'Share of supply to farmers', 0.02, 0.3, 0.01]];
+  function labOut(T) {
+    const moved = T.rows.slice(0, 10).map((r) => { const d = bySlug.get(r.slug).rank - r.rank; return '<tr><td class="rk">' + r.rank + '</td><td>' + esc(r.name) + '</td><td class="n val">' + usd(r.implied_value_usd) + '</td><td class="n">' + (d > 0 ? '<span class="pos">▲' + d + '</span>' : d < 0 ? '<span class="neg">▼' + -d + '</span>' : '<span class="dim">=</span>') + '</td></tr>'; });
+    const kept = T.rows.slice(0, 20).filter((r) => bySlug.get(r.slug).rank <= 20).length;
+    return '<p class="note">Top 20 kept: <b>' + kept + ' / 20</b> · board value ' + usd(T.rows.reduce((s, r) => s + r.implied_value_usd, 0)) + ' · rows worth farming ' + T.rows.filter((r) => r.plan.verdict === 'Farm').length + '</p><table class="mini"><tbody>' + moved.join('') + '</tbody></table>';
   }
 
   function simple(kind) {
@@ -169,6 +177,12 @@
     if (tr) location.hash = '#/p/' + tr.dataset.p;
   });
   $('app').addEventListener('change', (e) => { if (e.target.dataset.k) set(e.target.dataset.k, e.target.value); });
+  $('app').addEventListener('input', (e) => {
+    if (!e.target.dataset.lever) return;
+    const k = {};
+    document.querySelectorAll('[data-lever]').forEach((i) => { k[i.dataset.lever] = Number(i.value); $('lv-' + i.dataset.lever).textContent = i.value; });
+    $('labout').innerHTML = labOut(M.build(S, k));
+  });
   $('app').addEventListener('keydown', (e) => { if (e.target.id === 'q' && e.key === 'Enter') set('q', e.target.value.trim()); });
   window.addEventListener('hashchange', render);
   render();

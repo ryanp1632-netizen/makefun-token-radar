@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const [outDir, shotDir, chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'] = process.argv.slice(2);
 const SHOTS = [
   ['1-board.jpg', '#/board', 1000],
-  ['2-detail.jpg', '#/p/' + (process.env.DETAIL || 'polymarket-international'), 1000],
+  ['2-detail.jpg', '#/p/' + (process.env.DETAIL || 'figure-markets-prime'), 1100],
   ['3-filtered.jpg', '#/board?tier=early&v=Farm&s=drop', 1000],
   ['4-model.jpg', '#/model', 1000],
 ].slice(0, Number(process.env.SHOTS || 4));
