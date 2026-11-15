@@ -11,7 +11,8 @@
     ageFloor: 0.55, ageFullDays: 730, ageUnknownDays: 365, // young TVL is mercenary: full credit after 2y
     siblingHaircut: 0.3, // a watchlist row whose family token already trades keeps 30%
     shrink: 4, trimSigma: 2.5, // group effects shrink to the market line with 4 pseudo-comps
-    airdropShare: 0.1, // share of the token assumed to go to users who farmed it
+    airdropShare: 0.1, // share of the token assumed to go to users who farmed it, pro rata to TVL
+    capital: 1000, tbill: 0.04, // every plan is costed for this deposit, against the yield a T-bill pays meanwhile
   };
 
   // DefiLlama categories folded into mechanisms, so each group has comps enough to fit.
@@ -52,8 +53,9 @@
     for (const p of protocols) {
       if (!hasToken(p)) continue;
       const id = p.symbol ? p.symbol.toUpperCase() : idOf.get(p.gecko_id) || p.gecko_id || p.slug;
-      const f = fam.get(id) || { id, symbol: p.symbol, lead: p, members: [], tvl: 0, mcap: 0 };
+      const f = fam.get(id) || { id, symbol: p.symbol, lead: p, members: [], tvl: 0, mcap: 0, listed: null };
       f.members.push(p.slug);
+      if (p.listed_at && (!f.listed || p.listed_at < f.listed)) f.listed = p.listed_at;
       f.tvl += p.tvl_usd;
       if ((p.mcap_usd || 0) > f.mcap) f.mcap = p.mcap_usd;
       if (p.tvl_usd > f.lead.tvl_usd) f.lead = p;
@@ -88,6 +90,8 @@
     fit = run(kept);
     // Leave-one-out: refit without each comp and price it blind, against a flat median multiple.
     const ys = kept.map((c) => c.y).sort((p, q) => p - q);
+    const med = (v) => v.slice().sort((p, q) => p - q)[v.length >> 1];
+    const share = (v, t) => v.filter((e) => e <= t).length / v.length;
     let errFit = [], errFlat = [], pred = [], act = [];
     for (const c of kept) {
       const f = run(kept.filter((d) => d !== c));
@@ -97,11 +101,18 @@
       errFlat.push(Math.abs(c.y - others[others.length >> 1]));
       pred.push(yhat + c.x); act.push(c.y + c.x);
     }
-    const med = (v) => v.slice().sort((p, q) => p - q)[v.length >> 1];
+    // Time split: fit on the older half of the comps (by DefiLlama listing date), price the newer half blind.
+    const L = (c) => c.listed || '0000', byAge = kept.slice().sort((p, q) => (L(p) < L(q) ? -1 : L(p) > L(q) ? 1 : p.x - q.x));
+    const train = byAge.slice(0, byAge.length >> 1), test = byAge.slice(byAge.length >> 1), ft = run(train);
+    const flatT = med(train.map((c) => c.y)), errT = test.map((c) => Math.abs(c.y - ft.a - ft.b * c.x - (ft.g[c.g] || 0)));
+    // The value bands are the blind test's own misses: half of them fall inside band50, four in five inside band80.
+    const sorted = errFit.slice().sort((p, q) => p - q), band50 = sorted[sorted.length >> 1], band80 = sorted[Math.floor(sorted.length * 0.8)];
     return Object.assign(fit, {
-      n: kept.length, trimmed, comps: kept,
-      looFit: 10 ** med(errFit), looFlat: 10 ** med(errFlat), spearman: spearman(pred, act),
-      flat: 10 ** ys[ys.length >> 1],
+      n: kept.length, trimmed, comps: kept, band50, band80,
+      looFit: 10 ** band50, looFlat: 10 ** med(errFlat), spearman: spearman(pred, act),
+      within3: share(errFit, Math.log10(3)), within3Flat: share(errFlat, Math.log10(3)),
+      split: { cut: test[0].listed, nTrain: train.length, nTest: test.length, fit: 10 ** med(errT), flat: 10 ** med(test.map((c) => Math.abs(c.y - flatT))),
+        cover50: share(errT, band50), cover80: share(errT, band80) },
     });
   }
 
@@ -141,7 +152,7 @@
     for (const f of fams) for (const s of f.members) { const p = P.find((q) => q.slug === s); const w = firstWord(p.name); if (w && !famWords.has(w)) famWords.set(w, f.symbol || f.id); }
     const comps = fams
       .filter((f) => f.mcap >= 1e6 && f.tvl > 0 && !NOT_COMPS.has(f.lead.category))
-      .map((f) => ({ id: f.id, name: f.lead.name.replace(VERSION, ''), symbol: f.symbol, tvl: f.tvl, mcap: f.mcap, cat: f.lead.category, g: groupOf(f.lead.category), x: Math.log10(f.tvl) - 8, y: Math.log10(f.mcap / f.tvl) }));
+      .map((f) => ({ id: f.id, name: f.lead.name.replace(VERSION, ''), symbol: f.symbol, tvl: f.tvl, mcap: f.mcap, listed: f.listed, cat: f.lead.category, g: groupOf(f.lead.category), x: Math.log10(f.tvl) - 8, y: Math.log10(f.mcap / f.tvl) }));
     const fit = compsFit(comps, k);
 
     // Pre-token records: rank, or set aside with a reason. Siblings with one name share one launch.
@@ -174,7 +185,8 @@
         tier: onList.has(p.slug) ? 'watchlist' : p.tvl_usd >= snap.floor_usd ? 'above' : 'early',
         tvl_usd: p.tvl_usd, launch_tvl_usd: tvl, products, change_7d: p.change_7d, age_days: age, sibling_of: sib || null,
         multiple: m, growth_factor: gf, age_factor: af, sibling_factor: ff, implied_value_usd: implied,
-        low_usd: Math.round(implied * 10 ** (-0.6745 * fit.sigma)), high_usd: Math.round(implied * 10 ** (0.6745 * fit.sigma)),
+        low_usd: Math.round(implied * 10 ** -fit.band50), high_usd: Math.round(implied * 10 ** fit.band50),
+        p10_usd: Math.round(implied * 10 ** -fit.band80), p90_usd: Math.round(implied * 10 ** fit.band80),
         drop_per_1k: (implied * k.airdropShare * 1000) / tvl,
       });
     }
@@ -192,7 +204,7 @@
   /** playbook: the mechanism's own position (what to do, transactions, setup minutes, weekly action) and the
       risk that position carries (what to watch, how long an exit takes). Chosen by category, then mechanism. */
   function playbook(r, n, t, chain) {
-    const c = r.category || '', $t = '$' + t;
+    const c = r.category || '', $t = '$' + t.toLocaleString('en-US');
     const P = (act, tx, min, weekly, guard, exit) => ({ act, tx, min, weekly, guard, exit });
     if (/CDP/.test(c)) return P('Lock ' + $t + ' of ' + chain + "'s main collateral in " + n + ' and mint its stablecoin at no more than 40% LTV, then park the minted coins in its savings module if it has one.', 3, 20, 'check the collateral ratio and repay a little if LTV drifts over 50%', 'Set a price alert at the collateral price that takes LTV to 60%; repay first, then withdraw, if it fires.', 'repay and unlock: 2 transactions, minutes');
     if (/Lending/.test(c)) return P('Supply $' + Math.round(t * 0.7) + ' USDC to ' + n + ' on ' + chain + ', enable it as collateral, then borrow $' + Math.round(t * 0.25) + ' of a different stablecoin (about 35% LTV) so both supply and borrow count.', 4, 20, 'repay and re-borrow once so the account shows ongoing use', 'Keep the health factor above 2 and withdraw if utilization of the USDC market stays above 95% for a day (you may not get out later).', 'repay, then withdraw: 2 transactions, minutes unless utilization is pinned');
@@ -209,31 +221,33 @@
     return P('Use ' + n + ' with ' + $t + ' on ' + chain + ': one deposit plus one swap or transfer, so the wallet shows real activity.', 3, 20, 'one more transaction of the same kind', 'Exit if the app pauses withdrawals or changes its contracts without notice.', 'withdraw: 1-2 transactions');
   }
 
-  /** farmPlan: eight steps, before and after the token, each with what it costs and how long it takes. */
+  /** farmPlan: eight named steps, before and after the token, each with what it costs and how long it takes,
+      netted to the dollar: the deposit's slice of the drop, less every fee, less the T-bill yield it gives up. */
   function farmPlan(r, k) {
     const top = r.chains.slice(0, 3);
     const chain = top.length ? top.reduce((best, c) => ((GAS[c] ?? 0.25) < (GAS[best] ?? 0.25) ? c : best), top[0]) : 'its main chain';
-    const gas = GAS[chain] ?? 0.25, young = r.age_days !== null && r.age_days < 180;
-    const ticket = r.launch_tvl_usd < 20e6 || young ? 250 : r.launch_tvl_usd < 100e6 ? 500 : r.launch_tvl_usd < 1e9 ? 750 : 1000;
+    const gas = GAS[chain] ?? 0.25, C = k.capital, young = r.age_days !== null && r.age_days < 180;
     const hold = young ? 90 : r.age_days !== null && r.age_days < 365 ? 60 : 45, weeks = Math.round(hold / 7);
-    const n = r.name, pb = playbook(r, n, ticket, chain);
-    const S = (phase, text, cost, usd, time, min) => ({ phase, do: text, cost, usd, time, min });
+    const n = r.name, $C = '$' + C.toLocaleString('en-US'), pb = playbook(r, n, C, chain);
+    const S = (name, after, text, usd, cost, min, time) => ({ name, after, do: text, usd, cost, min, time });
     const steps = [
-      S('Set up', 'Make a fresh wallet for ' + n + ' and withdraw $' + ticket + ' of ' + (chain === 'Bitcoin' ? 'BTC' : chain === 'Tron' ? 'USDT' : 'USDC') + ' plus a small fee float straight from an exchange to ' + chain + (chain === r.chains[0] ? '' : ', the lowest-fee of the three chains where it holds most TVL') + '.', 'about $1 exchange withdrawal fee', 1, '15 min', 15),
-      S('Set up', pb.act, pb.tx + ' transactions, ' + money(gas * pb.tx), gas * pb.tx, pb.min + ' min', pb.min),
-      S('Set up', 'Open ' + n + "'s points or rewards page from its official site, link this wallet if it asks, and note the starting balance in a farm log.", 'free; a signature, not a transaction', 0, '5 min', 5),
-      S('Farm', 'Once a week, ' + pb.weekly + ', and log the points balance; skip a week when its fee would exceed a tenth of that week\'s points.', money(gas) + ' a week, ' + money(gas * weeks) + ' over ' + weeks + ' weeks', gas * weeks, '10 min a week', 10 * weeks),
-      S('Farm', 'Hold the position for ' + hold + ' days' + (r.age_days === null ? '' : ': ' + n + ' has run ' + fmtAge(r.age_days) + ' with no token, and drops usually weigh how long capital stayed') + '.', '$' + ticket + ' stays at work; no extra fee', 0, hold + ' days', 0),
-      S('Guard', pb.guard + ' Also exit if TVL falls more than 25% in a week on DefiLlama.', 'exit ' + money(gas * 2) + ' (' + pb.exit + ')', 0, '10 min a check, inside the weekly visit', 0),
-      S('After launch', 'When a token is announced, claim only from the link on ' + n + "'s official site or account, never from a DM; sell enough at launch to repay this plan's fees, then decide on the rest.", 'claim ' + money(gas) + ', one sale ' + money(gas), gas * 2, '20 min on launch day', 20),
-      S('After launch', 'If users get no allocation, or the claim window closes, unwind within a week: withdraw, revoke this wallet\'s approvals and close the log.', 'withdraw and revoke, ' + money(gas * 3), gas * 3, '15 min', 15),
+      S('Fund', 0, 'Make a fresh wallet for ' + n + ' and withdraw ' + $C + ' of ' + (chain === 'Bitcoin' ? 'BTC' : chain === 'Tron' ? 'USDT' : 'USDC') + ' plus a small fee float straight from an exchange to ' + chain + (chain === r.chains[0] ? '' : ', the lowest-fee of the three chains where it holds most TVL') + '.', 1, 'about $1 withdrawal fee', 15, '15 min'),
+      S('Position', 0, pb.act, gas * pb.tx, pb.tx + ' transactions, ' + money(gas * pb.tx), pb.min, pb.min + ' min'),
+      S('Track', 0, 'Open ' + n + "'s points or rewards page from its official site (check the contracts and audits it links), link this wallet if it asks, and note the starting balance.", 0, 'free: a signature, not a transaction', 10, '10 min'),
+      S('Upkeep', 0, 'Once a week, ' + pb.weekly + ", and log the points balance; skip a week when its fee would exceed a tenth of that week's points.", gas * weeks, money(gas) + ' a week, ' + money(gas * weeks) + ' over ' + weeks + ' weeks', 10 * weeks, '10 min a week'),
+      S('Hold', 0, 'Keep the deposit in for ' + hold + ' days' + (r.age_days === null ? '' : ': ' + n + ' has run ' + fmtAge(r.age_days) + ' with no token, and drops usually weigh how long capital stayed') + '.', 0, money((C * k.tbill * hold) / 365) + ' of forgone ' + k.tbill * 100 + "% T-bill yield (the position's own yield is upside)", 0, hold + ' days'),
+      S('Guard', 0, pb.guard + ' Also exit if TVL falls more than 25% in a week on DefiLlama.', 0, 'exit ' + money(gas * 2) + ' if it fires (' + pb.exit + ')', 0, 'inside the weekly visit'),
+      S('Claim', 1, 'When a token is announced, claim only from the link on ' + n + "'s official site or account, never from a DM or an ad; sell enough at launch to repay this plan's fees, then decide on the rest.", gas * 2, 'claim and one sale, ' + money(gas * 2), 20, '20 min on launch day'),
+      S('Unwind', 1, 'Withdraw once the claim is done, or after ' + hold + " days if no points program is announced; revoke this wallet's approvals and move the deposit to the next row worth farming.", gas * 3, 'withdraw and revoke, ' + money(gas * 3), 15, '15 min'),
     ];
-    const cost = steps.reduce((s, x) => s + x.usd, 0);
-    const drop = (r.implied_value_usd * k.airdropShare * ticket) / r.launch_tvl_usd;
+    const fees = steps.reduce((s, x) => s + x.usd, 0), carry = (k.tbill * hold) / 365, forgone = C * carry;
+    const perDollar = (r.implied_value_usd * k.airdropShare) / r.launch_tvl_usd, slice = perDollar * C, net = slice - fees - forgone;
+    const minutes = steps.reduce((s, x) => s + x.min, 0);
     return {
-      chain, gas, ticket, hold, steps, cost, minutes: steps.reduce((s, x) => s + x.min, 0), drop,
-      verdict: drop >= 3 * cost ? 'Farm' : drop >= cost ? 'Thin edge' : 'Watch only',
-      text: steps.map((x) => (x.phase === 'After launch' ? 'After the token: ' : 'Before the token, ' + x.phase.toLowerCase() + ': ') + x.do + ' Cost: ' + x.cost + '. Time: ' + x.time + '.'),
+      chain, gas, ticket: C, hold, steps, fees, forgone, slice, net, minutes, perHour: net / (minutes / 60), perDollar, carry,
+      paysFrom: perDollar > carry ? Math.ceil(fees / (perDollar - carry) / 10) * 10 : null, // the smallest deposit that nets above zero
+      verdict: net > 0 ? 'Farm' : slice > fees ? 'Thin edge' : 'Skip',
+      text: steps.map((x) => (x.after ? 'After the token, ' : 'Before the token, ') + x.name.toLowerCase() + ': ' + x.do + ' Cost: ' + x.cost + '. Time: ' + x.time + '.'),
     };
   }
   function fmtAge(d) { return d >= 365 ? (d / 365).toFixed(1) + ' years' : d >= 60 ? Math.round(d / 30.4) + ' months' : d + ' days'; }

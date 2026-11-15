@@ -76,7 +76,11 @@ const board = {
   model: 'launch-radar comps-1: implied = launch TVL x compsMultiple(TVL, mechanism) x growthFactor(7d) x ageFactor(days with no token) x siblingFactor',
   as_of: snapshot.as_of,
   source: snapshot.source,
-  comps: { n: radar.fit.n, a: r2(radar.fit.a), b: r2(radar.fit.b), sigma_log10: r2(radar.fit.sigma), loo_error_x: r2(radar.fit.looFit), flat_error_x: r2(radar.fit.looFlat), spearman: r2(radar.fit.spearman) },
+  comps: {
+    n: radar.fit.n, a: r2(radar.fit.a), b: r2(radar.fit.b), sigma_log10: r2(radar.fit.sigma), loo_error_x: r2(radar.fit.looFit), flat_error_x: r2(radar.fit.looFlat),
+    spearman: r2(radar.fit.spearman), within_3x: r2(radar.fit.within3), within_3x_flat: r2(radar.fit.within3Flat), band50_x: r2(10 ** radar.fit.band50), band80_x: r2(10 ** radar.fit.band80),
+    time_split: { cut: radar.fit.split.cut, train: radar.fit.split.nTrain, test: radar.fit.split.nTest, error_x: r2(radar.fit.split.fit), flat_error_x: r2(radar.fit.split.flat), cover50: r2(radar.fit.split.cover50), cover80: r2(radar.fit.split.cover80) },
+  },
   rows: rows.map((r) => ({
     rank: r.rank, slug: r.slug, name: r.name, implied_value_usd: r.implied_value_usd,
     implied_range_usd: [r.low_usd, r.high_usd], token_status: 'pre-token', tier: r.tier,
@@ -84,7 +88,12 @@ const board = {
     products: r.products.map((p: { slug: string }) => p.slug), change_7d: r.change_7d, listed_at: r.listed_at, days_without_token: r.age_days,
     factors: { comps_multiple: r2(r.multiple), growth: r2(r.growth_factor), age: r2(r.age_factor), sibling: r.sibling_factor },
     airdrop_per_1k_usd: r2(r.drop_per_1k),
-    farm: { chain: r.plan.chain, ticket_usd: r.plan.ticket, hold_days: r.plan.hold, cost_usd: r2(r.plan.cost), expected_drop_usd: r2(r.plan.drop), verdict: r.plan.verdict },
+    implied_p10_p90_usd: [r.p10_usd, r.p90_usd],
+    farm: {
+      chain: r.plan.chain, capital_usd: r.plan.ticket, hold_days: r.plan.hold, hands_on_minutes: r.plan.minutes,
+      slice_usd: r2(r.plan.slice), fees_usd: r2(r.plan.fees), tbill_forgone_usd: r2(r.plan.forgone), net_usd: r2(r.plan.net),
+      net_per_hour_usd: r2(r.plan.perHour), pays_from_usd: r.plan.paysFrom, verdict: r.plan.verdict,
+    },
     farm_steps: r.plan.text,
   })),
   set_aside: radar.aside.map((a: { slug: string; why: string }) => ({ slug: a.slug, why: a.why })),
@@ -106,7 +115,9 @@ copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) fail(`screenshots/ holds ${shots.length} images: hand in the board, a detail view and a filtered view`);
 
-writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: 65_536, screenshots: { max: 4, max_bytes: 524_288 }, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
+const dossier = buildDossier(out, { text_max_bytes: 65_536, screenshots: { max: 4, max_bytes: 524_288 }, dashboard: { max_files: 400, max_bytes: 4_194_304 } });
+if (dossier.length > 1_572_864) fail(`dossier.json is ${dossier.length} bytes; the gate takes 1.5 MiB: shrink the screenshots`);
+writeFileSync(join(out, 'dossier.json'), dossier);
 
 const tiers = (t: string) => rows.filter((r) => r.tier === t).length;
 process.stdout.write(
