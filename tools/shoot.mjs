@@ -11,8 +11,8 @@ const [outDir, shotDir, chrome = 'C:/Program Files/Google/Chrome/Application/chr
 const SHOTS = [
   ['1-board.jpg', '#/board', 1000],
   ['2-detail.jpg', '#/p/' + (process.env.DETAIL || 'figure-markets-prime'), 1280],
-  ['3-filtered.jpg', '#/board?tier=early&v=Farm&s=net', 1000],
-  ['4-model.jpg', '#/model', 1000],
+  ['3-filtered.jpg', '#/board?tier=early&s=odds', 1000],
+  ['4-model.jpg', '#/model', 820],
 ].slice(0, Number(process.env.SHOTS || 4));
 
 const port = 9300 + Math.floor(Math.random() * 500);

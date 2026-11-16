@@ -13,6 +13,7 @@
     shrink: 4, trimSigma: 2.5, // group effects shrink to the market line with 4 pseudo-comps
     airdropShare: 0.1, // share of the token assumed to go to users who farmed it, pro rata to TVL
     capital: 1000, tbill: 0.04, // every plan is costed for this deposit, against the yield a T-bill pays meanwhile
+    refits: 200, // bootstrap refits of the curve behind each row's rank range
   };
 
   // DefiLlama categories folded into mechanisms, so each group has comps enough to fit.
@@ -65,42 +66,59 @@
     return [...fam.values()];
   }
 
-  /** compsFit: log10(mcap/TVL) = a + b·(log10 TVL − 8) + groupEffect, fitted on the snapshot's own comps. */
+  /** fitCurve: least squares of y on x, alternated 12 times with each mechanism's mean residual shrunk by `shrink`. */
+  function fitCurve(pts, shrink) {
+    const g = {};
+    let a = 0, b = 0;
+    for (let it = 0; it < 12; it++) {
+      let sx = 0, sy = 0, sxx = 0, sxy = 0;
+      for (const c of pts) { const y = c.y - (g[c.g] || 0); sx += c.x; sy += y; sxx += c.x * c.x; sxy += c.x * y; }
+      const n = pts.length;
+      b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+      a = (sy - b * sx) / n;
+      const sum = {}, cnt = {};
+      for (const c of pts) { sum[c.g] = (sum[c.g] || 0) + c.y - a - b * c.x; cnt[c.g] = (cnt[c.g] || 0) + 1; }
+      for (const key in sum) g[key] = sum[key] / (cnt[key] + shrink);
+    }
+    let ss = 0;
+    for (const c of pts) ss += (c.y - a - b * c.x - (g[c.g] || 0)) ** 2;
+    return { a, b, g, sigma: Math.sqrt(ss / Math.max(1, pts.length - 2)) };
+  }
+
+  const pearson = (u, v) => {
+    const n = u.length, mu = u.reduce((s, x) => s + x, 0) / n, mv = v.reduce((s, x) => s + x, 0) / n;
+    let su = 0, sv = 0, suv = 0;
+    for (let i = 0; i < n; i++) { su += (u[i] - mu) ** 2; sv += (v[i] - mv) ** 2; suv += (u[i] - mu) * (v[i] - mv); }
+    return suv / Math.sqrt(su * sv);
+  };
+
+  /** compsFit: log10(mcap/TVL) = a + b·(log10 TVL − 8) + groupEffect, fitted on the snapshot's own comps, then tested. */
   function compsFit(comps, k) {
-    const run = (pts) => {
-      const g = {};
-      let a = 0, b = 0;
-      for (let it = 0; it < 12; it++) {
-        let sx = 0, sy = 0, sxx = 0, sxy = 0;
-        for (const c of pts) { const y = c.y - (g[c.g] || 0); sx += c.x; sy += y; sxx += c.x * c.x; sxy += c.x * y; }
-        const n = pts.length;
-        b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-        a = (sy - b * sx) / n;
-        const sum = {}, cnt = {};
-        for (const c of pts) { sum[c.g] = (sum[c.g] || 0) + c.y - a - b * c.x; cnt[c.g] = (cnt[c.g] || 0) + 1; }
-        for (const key in sum) g[key] = sum[key] / (cnt[key] + k.shrink);
-      }
-      let ss = 0;
-      for (const c of pts) ss += (c.y - a - b * c.x - (g[c.g] || 0)) ** 2;
-      return { a, b, g, sigma: Math.sqrt(ss / Math.max(1, pts.length - 2)) };
-    };
+    const run = (pts) => fitCurve(pts, k.shrink);
     let fit = run(comps);
     const kept = comps.filter((c) => Math.abs(c.y - fit.a - fit.b * c.x - (fit.g[c.g] || 0)) <= k.trimSigma * fit.sigma);
     const trimmed = comps.filter((c) => !kept.includes(c));
     fit = run(kept);
-    // Leave-one-out: refit without each comp and price it blind, against a flat median multiple.
+    // Leave-one-out: refit without each comp and price it blind, against the curve alone and a flat median multiple.
     const ys = kept.map((c) => c.y).sort((p, q) => p - q);
     const med = (v) => v.slice().sort((p, q) => p - q)[v.length >> 1];
     const share = (v, t) => v.filter((e) => e <= t).length / v.length;
-    let errFit = [], errFlat = [], pred = [], act = [];
+    let errFit = [], errCurve = [], errFlat = [], pred = [], act = [], resid = [], oos = [];
     for (const c of kept) {
-      const f = run(kept.filter((d) => d !== c));
+      const rest = kept.filter((d) => d !== c), f = run(rest), f0 = fitCurve(rest, 1e9);
       const yhat = f.a + f.b * c.x + (f.g[c.g] || 0);
       const others = ys.filter((y, i) => i !== ys.indexOf(c.y));
       errFit.push(Math.abs(c.y - yhat));
+      errCurve.push(Math.abs(c.y - f0.a - f0.b * c.x));
       errFlat.push(Math.abs(c.y - others[others.length >> 1]));
-      pred.push(yhat + c.x); act.push(c.y + c.x);
+      pred.push(yhat + c.x); act.push(c.y + c.x); resid.push(c.y - yhat);
+      oos.push({ p: yhat + c.x + 8, a: c.y + c.x + 8, g: c.g, name: c.name });
     }
+    // Factor check: do the blind misses lean with the 7-day move or with age? If not, those factors stay small.
+    const withC7 = kept.map((c, i) => [c.c7, resid[i]]).filter((e) => e[0] !== null);
+    const withAge = kept.map((c, i) => [c.age, resid[i]]).filter((e) => e[0] !== null);
+    const rC7 = pearson(withC7.map((e) => clamp(e[0], k.growthFloor, k.growthCap)), withC7.map((e) => e[1]));
+    const rAge = pearson(withAge.map((e) => Math.log10(1 + e[0])), withAge.map((e) => e[1]));
     // Time split: fit on the older half of the comps (by DefiLlama listing date), price the newer half blind.
     const L = (c) => c.listed || '0000', byAge = kept.slice().sort((p, q) => (L(p) < L(q) ? -1 : L(p) > L(q) ? 1 : p.x - q.x));
     const train = byAge.slice(0, byAge.length >> 1), test = byAge.slice(byAge.length >> 1), ft = run(train);
@@ -108,9 +126,9 @@
     // The value bands are the blind test's own misses: half of them fall inside band50, four in five inside band80.
     const sorted = errFit.slice().sort((p, q) => p - q), band50 = sorted[sorted.length >> 1], band80 = sorted[Math.floor(sorted.length * 0.8)];
     return Object.assign(fit, {
-      n: kept.length, trimmed, comps: kept, band50, band80,
-      looFit: 10 ** band50, looFlat: 10 ** med(errFlat), spearman: spearman(pred, act),
-      within3: share(errFit, Math.log10(3)), within3Flat: share(errFlat, Math.log10(3)),
+      n: kept.length, trimmed, comps: kept, band50, band80, oos, rC7, nC7: withC7.length, rAge, nAge: withAge.length,
+      looFit: 10 ** band50, looCurve: 10 ** med(errCurve), looFlat: 10 ** med(errFlat), spearman: spearman(pred, act),
+      within3: share(errFit, Math.log10(3)), within3Curve: share(errCurve, Math.log10(3)), within3Flat: share(errFlat, Math.log10(3)),
       split: { cut: test[0].listed, nTrain: train.length, nTest: test.length, fit: 10 ** med(errT), flat: 10 ** med(test.map((c) => Math.abs(c.y - flatT))),
         cover50: share(errT, band50), cover80: share(errT, band80) },
     });
@@ -152,7 +170,7 @@
     for (const f of fams) for (const s of f.members) { const p = P.find((q) => q.slug === s); const w = firstWord(p.name); if (w && !famWords.has(w)) famWords.set(w, f.symbol || f.id); }
     const comps = fams
       .filter((f) => f.mcap >= 1e6 && f.tvl > 0 && !NOT_COMPS.has(f.lead.category))
-      .map((f) => ({ id: f.id, name: f.lead.name.replace(VERSION, ''), symbol: f.symbol, tvl: f.tvl, mcap: f.mcap, listed: f.listed, cat: f.lead.category, g: groupOf(f.lead.category), x: Math.log10(f.tvl) - 8, y: Math.log10(f.mcap / f.tvl) }));
+      .map((f) => ({ id: f.id, name: f.lead.name.replace(VERSION, ''), symbol: f.symbol, tvl: f.tvl, mcap: f.mcap, listed: f.listed, c7: f.lead.change_7d, age: ageDays(snap.as_of, f.listed), cat: f.lead.category, g: groupOf(f.lead.category), x: Math.log10(f.tvl) - 8, y: Math.log10(f.mcap / f.tvl) }));
     const fit = compsFit(comps, k);
 
     // Pre-token records: rank, or set aside with a reason. Siblings with one name share one launch.
@@ -192,6 +210,18 @@
     }
     rows.sort((a, b) => b.implied_value_usd - a.implied_value_usd || (a.slug < b.slug ? -1 : 1));
     rows.forEach((r, i) => { r.rank = i + 1; r.plan = farmPlan(r, k); });
+
+    // Rank ranges: refit the curve on k.refits bootstrap resamples of the comps (a fixed seed, so every run agrees),
+    // re-rank the whole board each time, and keep each row's 10th and 90th percentile rank.
+    let seed = 20261114;
+    const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const seen = rows.map(() => []), base = rows.map((r) => r.growth_factor * r.age_factor * r.sibling_factor);
+    for (let b = 0; b < k.refits; b++) {
+      const f = fitCurve(fit.comps.map(() => fit.comps[Math.floor(rnd() * fit.comps.length)]), k.shrink);
+      const v = rows.map((r, i) => Math.log10(r.launch_tvl_usd) * (1 + f.b) + f.a - 8 * f.b + (f.g[r.group] || 0) + Math.log10(base[i]));
+      rows.map((r, i) => i).sort((p, q) => v[q] - v[p]).forEach((i, j) => seen[i].push(j + 1));
+    }
+    rows.forEach((r, i) => { const s = seen[i].sort((p, q) => p - q); r.rank_lo = s[Math.floor(s.length * 0.1)]; r.rank_hi = s[Math.floor(s.length * 0.9)]; });
 
     const trades = fams.filter((f) => f.mcap > 0).map((f) => ({ id: f.id, name: f.lead.name, symbol: f.symbol, cat: f.lead.category, members: f.members.length, tvl: f.tvl, mcap: f.mcap, comp: comps.some((c) => c.id === f.id) && !fit.trimmed.some((c) => c.id === f.id) })).sort((a, b) => b.mcap - a.mcap);
     return { k, fit, rows, aside: aside.sort((a, b) => b.tvl - a.tvl), trades, groups: GROUPS, tokenRecords: P.filter(hasToken).length };
@@ -243,11 +273,15 @@
     const fees = steps.reduce((s, x) => s + x.usd, 0), carry = (k.tbill * hold) / 365, forgone = C * carry;
     const perDollar = (r.implied_value_usd * k.airdropShare) / r.launch_tvl_usd, slice = perDollar * C, net = slice - fees - forgone;
     const minutes = steps.reduce((s, x) => s + x.min, 0);
+    const WHEN = { Fund: 'day 0', Position: 'day 0', Track: 'day 0', Upkeep: 'weekly ×' + weeks, Hold: 'days 1-' + hold, Guard: 'any day', Claim: 'at launch', Unwind: 'day ' + hold };
+    steps.forEach((s) => (s.when = WHEN[s.name]));
+    // The slice is paid only if a token launches. Break-even odds: the launch chance at which the plan pays its way.
+    const odds = (fees + forgone) / slice;
     return {
-      chain, gas, ticket: C, hold, steps, fees, forgone, slice, net, minutes, perHour: net / (minutes / 60), perDollar, carry,
+      chain, gas, ticket: C, hold, steps, fees, forgone, slice, net, minutes, perHour: net / (minutes / 60), perDollar, carry, odds,
       paysFrom: perDollar > carry ? Math.ceil(fees / (perDollar - carry) / 10) * 10 : null, // the smallest deposit that nets above zero
-      verdict: net > 0 ? 'Farm' : slice > fees ? 'Thin edge' : 'Skip',
-      text: steps.map((x) => (x.after ? 'After the token, ' : 'Before the token, ') + x.name.toLowerCase() + ': ' + x.do + ' Cost: ' + x.cost + '. Time: ' + x.time + '.'),
+      verdict: odds <= 0.5 ? 'Farm' : odds <= 1 ? 'Thin edge' : 'Skip',
+      text: steps.map((x) => (x.after ? 'After the token, ' : 'Before the token, ') + x.name.toLowerCase() + ' (' + x.when + '): ' + x.do + ' Cost: ' + x.cost + '. Time: ' + x.time + '.'),
     };
   }
   function fmtAge(d) { return d >= 365 ? (d / 365).toFixed(1) + ' years' : d >= 60 ? Math.round(d / 30.4) + ' months' : d + ' days'; }

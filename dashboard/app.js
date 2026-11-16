@@ -25,6 +25,7 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const usd = (v) => (v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(v >= 1e8 ? 0 : 1) + 'M' : v >= 1e4 ? '$' + (v / 1e3).toFixed(0) + 'K' : v >= 1e3 ? '$' + (v / 1e3).toFixed(1).replace('.0', '') + 'K' : v >= 100 ? '$' + Math.round(v) : '$' + v.toFixed(2));
   const sgn = (v) => (v >= 0 ? '+' : '−') + usd(Math.abs(v));
+  const odds = (o) => '<b class="' + (o <= 0.5 ? 'pos' : o <= 1 ? 'val' : 'neg') + '">' + (o > 1 ? '>100%' : Math.round(o * 100) + '%') + '</b>';
   const pct = (v) => (v === null ? '<span class="dim">n/a</span>' : '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + (v >= 0 ? '+' : '') + v.toFixed(1) + '%</span>');
   const age = (d) => (d === null ? '<span class="dim">unknown</span>' : d >= 365 ? (d / 365).toFixed(1) + 'y' : d >= 60 ? Math.round(d / 30.4) + 'mo' : d + 'd');
   const x = (v, n) => '×' + v.toFixed(n === undefined ? 3 : n);
@@ -48,7 +49,7 @@
   const set = (k, v) => { const { q } = parse(); if (v) q[k] = v; else delete q[k]; location.hash = link('board', q); };
 
   function tabs(cur) {
-    const t = [['board', 'No token yet', R0.rows.length], ['trades', 'Token already trades', R0.trades.length], ['aside', 'Set aside', R0.aside.length], ['model', 'Model & tests', F.n + ' comps']];
+    const t = [['board', 'No token yet', R0.rows.length], ['trades', 'Token already trades', R0.trades.length], ['aside', 'Set aside', R0.aside.length], ['model', 'Method & tests', F.n + ' comps']];
     $('tabs').innerHTML = t.map(([p, l, n]) => '<a href="#/' + p + '" class="' + (cur === p || (cur === 'p' && p === 'board') ? 'on' : '') + '">' + l + '<b>' + n + '</b></a>').join('');
   }
 
@@ -57,22 +58,23 @@
     const n = (v) => rows.filter((r) => r.plan.verdict === v).length;
     const best = rows.filter((r) => r.tier === 'watchlist' && r.plan.net > 0).sort((a, b) => b.plan.perHour - a.plan.perHour).slice(0, 3);
     return '<section class="hero"><div class="lead"><h1>' + rows.length + ' protocols record no token. Here is what each launch would be worth, and what farming it costs.</h1>' +
-      '<p>Each value is read off a curve fitted to the ' + F.n + ' token families that already trade in this snapshot, then moved by the protocol\'s 7-day TVL change and by how long it has run with no token. No name is hand-picked. Every row carries a farm plan costed step by step and netted to the dollar against the T-bill yield its capital gives up.</p>' +
+      '<p>Each value is read off a curve fitted to the ' + F.n + ' token families that already trade here, then moved by the 7-day TVL change and the time with no token. No name is hand-picked. Every farm plan is costed step by step and turned into break-even odds: the launch chance it needs to pay its way.</p>' +
       '<div class="tally"><span><b>' + rows.filter((r) => r.tier === 'watchlist').length + ' / ' + S.watchlist.length + '</b> watchlist ranked</span><span><b>' + rows.filter((r) => r.tier !== 'watchlist').length + '</b> found off the list</span><span><b>' + R0.trades.length + '</b> trading tokens kept apart</span><span><b>' + R0.aside.length + '</b> set aside by rule</span>' +
       '<span class="vts">' + vtag('Farm') + ' ' + n('Farm') + ' ' + vtag('Thin edge') + ' ' + n('Thin edge') + ' ' + vtag('Skip') + ' ' + n('Skip') + ' at ' + usd(R.k.capital) + '</span></div>' +
-      '<p class="note">Largest finds off the watchlist: ' + rows.filter((r) => r.tier !== 'watchlist').slice(0, 4).map((r) => '<a href="#/p/' + r.slug + '"><b>' + esc(r.name) + '</b> ' + usd(r.implied_value_usd) + '</a>').join(' · ') + '. Sibling products are folded into one launch, and records whose value belongs to a token that trades are set aside with the rule that did it.</p></div>' +
+      '<p class="note">Largest finds off the watchlist: ' + rows.filter((r) => r.tier !== 'watchlist').slice(0, 4).map((r) => '<a href="#/p/' + r.slug + '"><b>' + esc(r.name) + '</b> ' + usd(r.implied_value_usd) + '</a>').join(' · ') + '.</p></div>' +
       '<div class="how"><h3>How a launch is priced · <code>build()</code> in model.js</h3><div class="fx">value = TVL × ' + (10 ** F.a).toFixed(3) + ' × (TVL/$100M)<sup>' + F.b.toFixed(2) + '</sup> × mechanism × growth(7d) × age(no token) × sibling</div>' +
       '<table class="mini"><tbody><tr><td>Blind miss, each token left out</td><td class="n"><b class="pos">' + x(F.looFit, 2) + '</b> vs ' + x(F.looFlat, 2) + ' flat</td></tr>' +
       '<tr><td>Time split: fit ' + F.split.nTrain + ' older, test ' + F.split.nTest + ' listed from ' + F.split.cut + '</td><td class="n"><b class="pos">' + x(F.split.fit, 2) + '</b> vs ' + x(F.split.flat, 2) + ' flat</td></tr>' +
       '<tr><td>Blind price within 3× of the real cap</td><td class="n"><b>' + Math.round(F.within3 * 100) + '%</b> vs ' + Math.round(F.within3Flat * 100) + '% flat</td></tr>' +
-      '<tr><td>Newer tokens inside the 50% / 80% band</td><td class="n"><b>' + Math.round(F.split.cover50 * 100) + '% / ' + Math.round(F.split.cover80 * 100) + '%</b></td></tr></tbody></table>' +
+      '<tr><td>Newer tokens inside the 50% / 80% band</td><td class="n"><b>' + Math.round(F.split.cover50 * 100) + '% / ' + Math.round(F.split.cover80 * 100) + '%</b></td></tr>' +
+      '<tr><td>Rank range under each rank</td><td class="n"><b>P10–P90</b> over ' + R0.k.refits + ' refits</td></tr></tbody></table>' +
       '<p class="note">Best net per hands-on hour on the watchlist: ' + best.map((r) => '<a href="#/p/' + r.slug + '" class="val">' + esc(r.name) + ' ' + sgn(r.plan.perHour) + '/h</a>').join(' · ') + '</p></div></section>';
   }
 
   const COLS = [
     ['rank', '#', (r) => r.rank], ['name', 'Protocol', (r) => r.name.toLowerCase()], ['tvl', 'TVL', (r) => r.launch_tvl_usd], ['c7', '7d', (r) => r.change_7d ?? -1e9],
     ['age', 'No token for', (r) => r.age_days ?? -1], ['implied', 'Implied value · 50% band', (r) => r.implied_value_usd], ['slice', 'Slice', (r) => r.plan.slice],
-    ['net', 'Net of all costs', (r) => r.plan.net], ['hour', 'Farm · fees · hold', (r) => r.plan.perHour],
+    ['net', 'Net if it launches', (r) => r.plan.net], ['odds', 'Break-even odds', (r) => -r.plan.odds], ['hour', 'Farm · fees · hold', (r) => r.plan.perHour],
   ];
 
   function board(q) {
@@ -93,16 +95,16 @@
       sel('m', '7-day TVL', [['up', 'Gaining'], ['down', 'Falling']], 'Any') + sel('v', 'Verdict', [['Farm', 'Farm'], ['Thin edge', 'Thin'], ['Skip', 'Skip']], 'Any') +
       sel('cap', 'Capital', [['', '$1,000'], ['250', '$250'], ['10000', '$10,000'], ['100000', '$100,000']]) + sel('sh', 'Airdrop share', [['', '10% of value'], ['0.05', '5%'], ['0.2', '20%']]) +
       '<span class="count"><b>' + list.length + '</b> of ' + rows.length + ' · ' + usd(list.reduce((s, r) => s + r.implied_value_usd, 0)) + ' implied · click a column to sort, a row for its plan</span></div>';
-    h += '<div class="grid"><table><thead><tr>' + COLS.map(([k, l]) => '<th data-s="' + k + '" class="' + (['tvl', 'c7', 'age', 'slice', 'net'].includes(k) ? 'n ' : '') + (k === sk ? 'sorted' + (asc ? ' asc' : '') : '') + '">' + (k === 'slice' ? usd(R.k.capital) + ' slice' : l) + '</th>').join('') + '</tr></thead><tbody>';
+    h += '<div class="grid"><table><thead><tr>' + COLS.map(([k, l]) => '<th data-s="' + k + '" class="' + (['tvl', 'c7', 'age', 'slice', 'net', 'odds'].includes(k) ? 'n ' : '') + (k === sk ? 'sorted' + (asc ? ' asc' : '') : '') + '">' + (k === 'slice' ? usd(R.k.capital) + ' slice' : l) + '</th>').join('') + '</tr></thead><tbody>';
     for (const r of list) {
       const p = r.plan;
-      h += '<tr data-p="' + r.slug + '"><td class="rk">' + r.rank + '</td><td class="pn"><b>' + esc(r.name) + ' <span class="tier ' + r.tier + '">' + TIER[r.tier] + '</span></b><span><i class="dot" style="background:' + GC[r.group] + '"></i>' + esc(r.category || 'No category') + ' · ' + esc(r.chains.slice(0, 2).join(', ')) + (r.chains.length > 2 ? ' +' + (r.chains.length - 2) : '') + '</span></td>' +
+      h += '<tr data-p="' + r.slug + '"><td class="rk">' + r.rank + '<small>' + r.rank_lo + '–' + r.rank_hi + '</small></td><td class="pn"><b>' + esc(r.name) + ' <span class="tier ' + r.tier + '">' + TIER[r.tier] + '</span></b><span><i class="dot" style="background:' + GC[r.group] + '"></i>' + esc(r.category || 'No category') + ' · ' + esc(r.chains.slice(0, 2).join(', ')) + (r.chains.length > 2 ? ' +' + (r.chains.length - 2) : '') + '</span></td>' +
         '<td class="n">' + usd(r.launch_tvl_usd) + '</td><td class="n">' + pct(r.change_7d) + '</td><td class="n">' + age(r.age_days) + '</td>' +
         '<td class="iv"><b>' + usd(r.implied_value_usd) + '</b><div class="bar"><i style="left:' + pos(r.low_usd) + '%;right:' + (100 - pos(r.high_usd)) + '%"></i><em style="left:' + pos(r.implied_value_usd) + '%"></em></div></td>' +
         '<td class="n">' + usd(p.slice) + '</td><td class="n net">' + vtag(p.verdict) + ' <b class="' + (p.net > 0 ? 'pos' : 'neg') + '">' + sgn(p.net) + '</b><br><span class="dim">' + sgn(p.perHour) + '/h · ' + (p.paysFrom ? 'pays from ' + usd(p.paysFrom) : 'never beats a T-bill') + '</span></td>' +
-        '<td><span class="play">' + gname(r.group).split(' ')[0] + ' · ' + esc(p.chain) + '</span><br><span class="dim">' + usd(p.fees) + ' fees · ' + p.hold + 'd · ' + (p.minutes / 60).toFixed(1) + 'h work</span></td></tr>';
+        '<td class="n">' + odds(p.odds) + '</td><td><span class="play">' + gname(r.group).split(' ')[0] + ' · ' + esc(p.chain) + '</span><br><span class="dim">' + usd(p.fees) + ' fees · ' + p.hold + 'd · ' + (p.minutes / 60).toFixed(1) + 'h work</span></td></tr>';
     }
-    return h + (list.length ? '' : '<tr><td colspan="9" class="empty">No protocol matches these filters.</td></tr>') + '</tbody></table></div>';
+    return h + (list.length ? '' : '<tr><td colspan="10" class="empty">No protocol matches these filters.</td></tr>') + '</tbody></table></div>';
   }
 
   function nearest(r, n) {
@@ -117,11 +119,11 @@
     const curve = tvl * 10 ** (F.a + F.b * (Math.log10(tvl) - 8)), mech = 10 ** (F.g[r.group] || 0);
     const kpi = (l, v, s) => '<div class="kpi"><i>' + l + '</i><b>' + v + '</b><span>' + s + '</span></div>';
     let h = '<a class="back" href="#/board">← Board</a>' + (prev ? ' · <a class="back" href="#/p/' + prev.slug + '">↑ #' + prev.rank + ' ' + esc(prev.name) + '</a>' : '') + (next ? ' · <a class="back" href="#/p/' + next.slug + '">↓ #' + next.rank + ' ' + esc(next.name) + '</a>' : '');
-    h += '<div class="dhead"><h1>' + esc(r.name) + '</h1><span class="tier ' + r.tier + '">' + TIER[r.tier] + '</span><span class="rkb">Rank <b>#' + r.rank + '</b> of ' + rows.length + ' · ' + esc(r.category || 'No category') + ' → ' + gname(r.group) + ' · ' + esc(r.chains.join(', ')) + '</span></div>' +
+    h += '<div class="dhead"><h1>' + esc(r.name) + '</h1><span class="tier ' + r.tier + '">' + TIER[r.tier] + '</span><span class="rkb">Rank <b>#' + r.rank + '</b> of ' + rows.length + ' (P10–P90 over ' + R.k.refits + ' refits: ' + r.rank_lo + '–' + r.rank_hi + ') · ' + esc(r.category || 'No category') + ' → ' + gname(r.group) + ' · ' + esc(r.chains.join(', ')) + '</span></div>' +
       '<p class="note" style="margin:-6px 0 12px">DefiLlama records no token for ' + esc(r.name) + ' (no market cap, ticker or CoinGecko id) as of ' + esc(S.as_of) + '. A record is not proof: check its own channels before farming.</p>';
     h += '<section class="kpis k5">' + kpi('Implied value', '<span class="val">' + usd(r.implied_value_usd) + '</span>', '50% band ' + usd(r.low_usd) + '–' + usd(r.high_usd)) + kpi('Launch TVL', usd(tvl), '7d ' + pct(r.change_7d)) +
       kpi('No token for', age(r.age_days), 'tracked since ' + esc(r.listed_at || 'unknown')) + kpi(usd(p.ticket) + ' slice', usd(p.slice), R.k.airdropShare * 100 + '% to depositors, pro rata') +
-      kpi('Net of all costs', '<span class="' + (p.net > 0 ? 'pos' : 'neg') + '">' + sgn(p.net) + '</span>', vtag(p.verdict) + ' ' + usd(p.fees) + ' fees + ' + usd(p.forgone) + ' T-bill') + '</section>';
+      kpi('Break-even odds', odds(p.odds), vtag(p.verdict) + ' net if it launches ' + sgn(p.net)) + '</section>';
     const row = (l, v, s, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + l + '</td><td class="n mono">' + v + '</td><td class="dim">' + s + '</td></tr>';
     h += '<div class="detail"><div><section class="card"><h3>How ' + usd(r.implied_value_usd) + ' is built</h3><table class="mini built"><tbody>' +
       row('Size curve', usd(curve), 'what a traded token with ' + usd(tvl) + ' of TVL is worth on the fitted curve') +
@@ -134,17 +136,17 @@
       '<p class="note">Recomputed on this page from the snapshot; board.json carries the same ' + usd(r.implied_value_usd) + ' at rank ' + r.rank + '.</p></section>';
     h += '<section class="card" style="margin-top:14px"><h3>Against traded peers: nearest ' + gname(r.group).toLowerCase() + ' tokens by TVL</h3>' + chart(r) + '<table class="mini"><tbody>' +
       nearest(r, 4).map((c) => '<tr><td>' + esc(c.name) + ' <span class="dim mono">' + esc(c.symbol || '') + '</span></td><td class="n">TVL ' + usd(c.tvl) + '</td><td class="n">mcap ' + usd(c.mcap) + '</td><td class="n mono">' + x(c.mcap / c.tvl) + '</td></tr>').join('') + '</tbody></table></section></div>';
-    h += '<section class="card"><h3>Farm plan · ' + esc(gname(r.group).toLowerCase()) + ' on ' + esc(p.chain) + ' · ' + usd(p.ticket) + ' for ' + p.hold + ' days</h3><table class="plan"><thead><tr><th></th><th>Step</th><th class="n">Cost</th><th class="n">Time</th></tr></thead><tbody>' +
-      p.steps.map((s, i) => '<tr><td class="rk">' + (i + 1) + '</td><td><b class="' + (s.after ? 'aft' : 'bef') + '">' + s.name + '.</b> ' + esc(s.do) + '<div class="dim">' + esc(s.cost) + '</div></td><td class="n">' + (s.usd ? M.money(s.usd) : s.name === 'Hold' ? M.money(p.forgone) : 'none') + '</td><td class="n">' + esc(s.time.replace(' on launch day', '').replace('inside the weekly visit', 'weekly')) + '</td></tr>').join('') +
-      '</tbody></table><div class="sum"><span>Slice <b>' + usd(p.slice) + '</b></span><span>Fees <b class="neg">−' + usd(p.fees) + '</b></span><span>T-bill forgone <b class="neg">−' + usd(p.forgone) + '</b></span><span>Net <b class="' + (p.net > 0 ? 'pos' : 'neg') + '">' + sgn(p.net) + '</b></span><span>Work <b>' + (p.minutes / 60).toFixed(1) + ' h</b></span><span>Per hour <b>' + sgn(p.perHour) + '</b></span></div>' +
+    h += '<section class="card"><h3>Farm plan · ' + esc(gname(r.group).toLowerCase()) + ' on ' + esc(p.chain) + ' · ' + usd(p.ticket) + ' for ' + p.hold + ' days</h3><table class="plan"><thead><tr><th></th><th>When</th><th>Step</th><th class="n">Cost</th><th class="n">Time</th></tr></thead><tbody>' +
+      p.steps.map((s, i) => '<tr><td class="rk">' + (i + 1) + '</td><td class="when">' + s.when + '</td><td><b class="' + (s.after ? 'aft' : 'bef') + '">' + s.name + '.</b> ' + esc(s.do) + '<div class="dim">' + esc(s.cost) + '</div></td><td class="n">' + (s.usd ? M.money(s.usd) : s.name === 'Hold' ? M.money(p.forgone) : 'none') + '</td><td class="n">' + esc(s.time.replace(' on launch day', '').replace('inside the weekly visit', 'weekly')) + '</td></tr>').join('') +
+      '</tbody></table><div class="sum"><span>Slice <b>' + usd(p.slice) + '</b></span><span>Fees <b class="neg">−' + usd(p.fees) + '</b></span><span>T-bill forgone <b class="neg">−' + usd(p.forgone) + '</b></span><span>Net <b class="' + (p.net > 0 ? 'pos' : 'neg') + '">' + sgn(p.net) + '</b></span><span>Work <b>' + (p.minutes / 60).toFixed(1) + ' h</b></span><span>Per hour <b>' + sgn(p.perHour) + '</b></span><span>Break-even odds ' + odds(p.odds) + '</span></div>' +
       '<table class="mini netat"><thead><tr><th>Net at</th>' + [0.05, 0.1, 0.2].map((s) => '<th class="n">' + s * 100 + '% drop</th>').join('') + '</tr></thead><tbody>' +
       [1e3, 1e4, 1e5].map((c) => '<tr><td>' + usd(c) + '</td>' + [0.05, 0.1, 0.2].map((s) => { const v = (p.perDollar * s) / R.k.airdropShare * c - p.fees - c * p.carry; return '<td class="n ' + (v > 0 ? 'pos' : 'neg') + (c === p.ticket && s === R.k.airdropShare ? ' cur' : '') + '">' + sgn(v) + '</td>'; }).join('') + '</tr>').join('') + '</tbody></table>' +
-      '<p class="note">' + vtag(p.verdict) + ' Farm: the slice beats every fee and the ' + R.k.tbill * 100 + '% T-bill yield the deposit gives up. Thin: it beats the fees only. Skip: fees eat it. ' + (p.paysFrom ? 'This plan nets above zero from ' + usd(p.paysFrom) + ' of capital.' : 'At this value no deposit size beats a T-bill.') + ' Gas is a typical ' + esc(p.chain) + ' fee of ' + M.money(p.gas) + ' a transaction.</p></section></div>';
+      '<p class="note">The slice is paid only if a token launches, so the plan pays its way when the chance of a launch beats (fees + forgone T-bill yield) ÷ slice = ' + odds(p.odds) + '. ' + vtag('Farm') + ' at 50% or less, ' + vtag('Thin edge') + ' up to 100%, ' + vtag('Skip') + ' above: not even a sure launch repays it. ' + (p.paysFrom ? 'This plan nets above zero from ' + usd(p.paysFrom) + ' of capital.' : 'At this value no deposit size beats a T-bill.') + ' Gas is a typical ' + esc(p.chain) + ' fee of ' + M.money(p.gas) + ' a transaction.</p></section></div>';
     return h;
   }
 
   function chart(hl) {
-    const W = 640, H = hl ? 220 : 380, L = 46, T = 12, Rr = 12, Bm = 32, xs = [-1.5, 2.4], ys = [-3, 1.5];
+    const W = 640, H = 220, L = 46, T = 12, Rr = 12, Bm = 32, xs = [-1.5, 2.4], ys = [-3, 1.5];
     const sx = (v) => L + ((v - xs[0]) / (xs[1] - xs[0])) * (W - L - Rr), sy = (v) => T + ((ys[1] - v) / (ys[1] - ys[0])) * (H - T - Bm);
     let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '">';
     for (let v = -1; v <= 2; v++) s += '<line class="gl" x1="' + sx(v) + '" x2="' + sx(v) + '" y1="' + T + '" y2="' + (H - Bm) + '"/><text x="' + sx(v) + '" y="' + (H - Bm + 15) + '" text-anchor="middle">' + usd(10 ** (v + 8)).replace('.00', '') + '</text>';
@@ -152,35 +154,44 @@
     s += '<text x="' + (W - Rr) + '" y="' + (H - 4) + '" text-anchor="end">TVL (log) →</text><text x="' + L + '" y="' + (T + 10) + '" dx="6">mcap / TVL (log)</text>';
     const band = (w, o) => '<path d="M' + sx(xs[0]) + ' ' + sy(F.a + F.b * xs[0] + w) + ' L' + sx(xs[1]) + ' ' + sy(F.a + F.b * xs[1] + w) + ' L' + sx(xs[1]) + ' ' + sy(F.a + F.b * xs[1] - w) + ' L' + sx(xs[0]) + ' ' + sy(F.a + F.b * xs[0] - w) + 'Z" fill="#f6bb45" fill-opacity="' + o + '"/>';
     s += band(F.band80, 0.05) + band(F.band50, 0.08) + '<path class="fit" d="M' + sx(xs[0]) + ' ' + sy(F.a + F.b * xs[0]) + ' L' + sx(xs[1]) + ' ' + sy(F.a + F.b * xs[1]) + '"/>';
-    if (!hl) for (const r of R0.rows) s += '<circle cx="' + sx(Math.log10(r.launch_tvl_usd) - 8) + '" cy="' + sy(Math.log10(r.implied_value_usd / r.launch_tvl_usd)) + '" r="3" fill="none" stroke="#f6bb45" stroke-opacity=".55"/>';
     for (const c of F.comps) { const dim = hl && c.g !== hl.group; s += '<circle cx="' + sx(c.x) + '" cy="' + sy(c.y) + '" r="' + (dim ? 3 : 4.2) + '" fill="' + GC[c.g] + '" fill-opacity="' + (dim ? 0.18 : 0.85) + '"><title>' + esc(c.name) + ' ' + x(c.mcap / c.tvl) + '</title></circle>'; }
     if (hl) { const cx = sx(Math.log10(hl.launch_tvl_usd) - 8), cy = sy(Math.log10(hl.implied_value_usd / hl.launch_tvl_usd)); s += '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="none" stroke="#f6bb45" stroke-width="2.5"/><text x="' + (cx + 12) + '" y="' + (cy + 4) + '" style="fill:#f6bb45;font-weight:600">' + esc(hl.name) + '</text>'; }
-    return s + '</svg><div class="legend">' + Object.keys(GC).map((g) => '<span><i style="background:' + GC[g] + '"></i>' + gname(g) + '</span>').join('') + '<span><i style="border:2px solid #f6bb45;background:none"></i>' + (hl ? 'this protocol' : 'pre-token rows at their implied multiple') + '</span><span style="color:#f6bb45">- - curve, shaded 50% / 80% blind band</span></div>';
+    return s + '</svg><div class="legend">' + Object.keys(GC).map((g) => '<span><i style="background:' + GC[g] + '"></i>' + gname(g) + '</span>').join('') + '<span class="val">○ this protocol · - - curve, shaded 50% / 80% blind band</span></div>';
   }
 
-  // The lab re-runs build() with the levers moved and compares the new top 10 with the board's.
-  const LEVERS = [['growthWeight', 'Weight of the 7-day move', 0, 1, 0.05], ['ageFloor', 'Credit for a brand-new protocol', 0.2, 1, 0.05], ['ageFullDays', 'Days to full age credit', 180, 1460, 10], ['shrink', 'Pseudo-comps per mechanism', 0, 20, 1]];
-  function labOut(T) {
-    const kept = T.rows.slice(0, 20).filter((r) => base.get(r.slug).rank <= 20).length;
-    return '<p class="note">Top 20 kept: <b>' + kept + ' / 20</b> · board value ' + usd(T.rows.reduce((s, r) => s + r.implied_value_usd, 0)) + '</p><table class="mini"><tbody>' + T.rows.slice(0, 8).map((r) => { const d = base.get(r.slug).rank - r.rank; return '<tr><td class="rk">' + r.rank + '</td><td>' + esc(r.name) + '</td><td class="n val">' + usd(r.implied_value_usd) + '</td><td class="n">' + (d > 0 ? '<span class="pos">▲' + d + '</span>' : d < 0 ? '<span class="neg">▼' + -d + '</span>' : '<span class="dim">=</span>') + '</td></tr>'; }).join('') + '</tbody></table>';
+  // Out of sample: every traded token priced by a curve refitted without it, set against its real market cap.
+  function oosChart() {
+    const W = 560, H = 330, L = 48, T = 10, Rr = 10, Bm = 32, lo = 5.5, hi = 10.2, t3 = Math.log10(3);
+    const sx = (v) => L + ((v - lo) / (hi - lo)) * (W - L - Rr), sy = (v) => T + ((hi - v) / (hi - lo)) * (H - T - Bm);
+    let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '"><path d="M' + sx(lo) + ' ' + sy(lo + t3) + ' L' + sx(hi - t3) + ' ' + sy(hi) + ' L' + sx(hi) + ' ' + sy(hi) + ' L' + sx(hi) + ' ' + sy(hi - t3) + ' L' + sx(lo + t3) + ' ' + sy(lo) + ' L' + sx(lo) + ' ' + sy(lo) + 'Z" fill="#3fe0b2" fill-opacity=".08"/>';
+    for (let v = 6; v <= 10; v++) s += '<line class="gl" x1="' + sx(v) + '" x2="' + sx(v) + '" y1="' + T + '" y2="' + (H - Bm) + '"/><line class="gl" x1="' + L + '" x2="' + (W - Rr) + '" y1="' + sy(v) + '" y2="' + sy(v) + '"/><text x="' + sx(v) + '" y="' + (H - Bm + 15) + '" text-anchor="middle">' + usd(10 ** v).replace('.00', '') + '</text><text x="' + (L - 6) + '" y="' + (sy(v) + 4) + '" text-anchor="end">' + usd(10 ** v).replace('.00', '') + '</text>';
+    s += '<path class="fit" d="M' + sx(lo) + ' ' + sy(lo) + ' L' + sx(hi) + ' ' + sy(hi) + '" style="stroke:#3fe0b2"/>';
+    for (const o of F.oos) s += '<circle cx="' + sx(o.p) + '" cy="' + sy(o.a) + '" r="4" fill="' + GC[o.g] + '" fill-opacity=".85"><title>' + esc(o.name) + '</title></circle>';
+    return s + '<text x="' + (W - Rr) + '" y="' + (H - 3) + '" text-anchor="end">blind price, the token left out of the fit →</text><text x="' + (L + 6) + '" y="' + (T + 12) + '">↑ real market cap</text></svg>';
   }
 
   function model() {
-    const gs = Object.keys(R0.groups), kv = (l, v) => '<span>' + l + '</span><b>' + v + '</b>';
-    let h = hero() + '<div class="lab"><section class="card"><h3>The comps: every priced token family, and the curve the board is priced on</h3>' + chart(null) +
-      '<p class="note">Each dot is one token family (records joined by ticker, TVL summed, largest market cap kept) that is not an exchange or chain token and has a market cap of at least $1M. ' + F.trimmed.length + ' beyond ' + R0.k.trimSigma + 'σ were trimmed before the refit: ' + F.trimmed.map((c) => esc(c.name)).join(', ') + '.</p></section><div>';
-    h += '<section class="card"><h3>How the curve held up out of sample</h3><div class="k">' + kv('Leave-one-out median miss', '<span class="pos">' + x(F.looFit, 2) + '</span> vs ' + x(F.looFlat, 2) + ' flat') +
-      kv('Time split (fit before ' + F.split.cut + ')', '<span class="pos">' + x(F.split.fit, 2) + '</span> vs ' + x(F.split.flat, 2) + ' flat') + kv('Within 3× of the real cap', Math.round(F.within3 * 100) + '% vs ' + Math.round(F.within3Flat * 100) + '%') +
-      kv('Newer tokens inside 50% / 80% band', Math.round(F.split.cover50 * 100) + '% / ' + Math.round(F.split.cover80 * 100) + '%') + kv('Rank correlation, blind vs real', F.spearman.toFixed(2)) + '</div>' +
-      '<p class="note">Bands are the leave-one-out misses themselves (' + x(10 ** F.band50, 2) + ' for 50%, ' + x(10 ** F.band80, 2) + ' for 80%), then checked on the newer half the time split never saw.</p></section>';
-    h += '<section class="card" style="margin-top:14px"><h3>Levers: move one and the board is rebuilt</h3>' + LEVERS.map(([k, l, a, b, st]) => '<label class="lever">' + l + ' <code>' + k + '</code><input type="range" data-lever="' + k + '" min="' + a + '" max="' + b + '" step="' + st + '" value="' + R0.k[k] + '"><b id="lv-' + k + '">' + R0.k[k] + '</b></label>').join('') + '<div id="labout">' + labOut(R0) + '</div></section>';
-    h += '<section class="card" style="margin-top:14px"><h3>Mechanism effects (shrunk)</h3><table class="mini"><tbody>' + gs.map((g) => '<tr><td><i class="dot" style="background:' + GC[g] + '"></i>' + gname(g) + '</td><td class="n">' + F.comps.filter((c) => c.g === g).length + ' comps</td><td class="n">' + R0.rows.filter((r) => r.group === g).length + ' rows</td><td class="n mono">' + x(10 ** (F.g[g] || 0), 2) + '</td></tr>').join('') + '</tbody></table></section></div></div>';
+    const gs = Object.keys(R0.groups), pc = (v) => Math.round(v * 100) + '%', r2 = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
+    const sec = (t, b) => '<h4>' + t + '</h4><p>' + b + '</p>';
+    let h = '<div class="lab"><section class="card method"><h3>Method · every number here is computed by <code>build()</code> in model.js</h3>' +
+      sec('Universe', S.protocols.length + ' protocols with at least $5M of TVL. Pre-token: no market cap, ticker or CoinGecko id. Exchanges, bridged and staked assets and siblings of a traded token are set aside with their rule (' + R0.aside.length + '); products that would share one token are folded into one launch. That leaves ' + R0.rows.length + ' rows, all ' + S.watchlist.length + ' watchlist names among them.') +
+      sec('Curve', 'One point per token family: records that share a ticker are joined and their TVL summed. Exchange and chain tokens and caps under $1M are left out. log10(mcap/TVL) = ' + F.a.toFixed(3) + ' ' + (F.b < 0 ? '−' : '+') + ' ' + Math.abs(F.b).toFixed(3) + ' × log10(TVL/$100M) over ' + F.n + ' families (' + F.trimmed.length + ' trimmed past ' + R0.k.trimSigma + 'σ). A slope under zero means a small protocol trades at a higher multiple of its TVL.') +
+      sec('Mechanism', 'Categories fold into seven mechanisms. Each one\'s mean residual is shrunk toward the curve as if ' + R0.k.shrink + ' extra tokens sat on it: ' + gs.map((g) => gname(g) + ' ' + x(10 ** (F.g[g] || 0), 2)).join(', ') + '.') +
+      sec('Growth and age', 'growthFactor() carries half of the 7-day TVL move (clamped ' + R0.k.growthFloor + '% to +' + R0.k.growthCap + '%); ageFactor() credits time on record with no token, ' + R0.k.ageFloor + ' rising to 1.00 at ' + R0.k.ageFullDays + ' days. Factor check: the comps\' blind misses lean with the 7-day move by r = ' + r2(F.rC7) + ' (n ' + F.nC7 + ') and with token age by r = ' + r2(F.rAge) + ' (n ' + F.nAge + '). The snapshot cannot confirm either, so both stay small; size and mechanism carry the value.') +
+      sec('Ranges', 'Value bands are the leave-one-out misses themselves (' + x(10 ** F.band50, 2) + ' holds half, ' + x(10 ** F.band80, 2) + ' four in five). Rank ranges refit the curve on ' + R0.k.refits + ' bootstrap resamples of the comps (fixed seed) and re-rank the board each time: the P10–P90 of each row\'s rank.') +
+      sec('Farm plans', 'Eight steps (fund, position, track, upkeep, hold, guard, claim, unwind), each with dollars, minutes and a day; gas from one per-chain table, on the cheapest of the top three chains. Slice = implied value × ' + pc(R0.k.airdropShare) + ' to depositors × deposit ÷ TVL, paid only if a token launches. Break-even odds = (fees + ' + pc(R0.k.tbill) + ' T-bill yield forgone) ÷ slice: Farm at 50% or less, Thin up to 100%, Skip above.') +
+      sec('Limits', 'One day of DefiLlama data. Nothing here says whether or when a token launches; read the board as a ranking and an order of magnitude, not a price.') + '</section><div>';
+    const tr = (l, m, w, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + l + '</td><td class="n mono">' + m + '</td><td class="n">' + w + '</td></tr>';
+    h += '<section class="card"><h3>Out of sample: each traded token priced as if it had none</h3>' + oosChart() + '<table class="mini"><thead><tr><th>Test</th><th class="n">Median miss</th><th class="n">Within 3×</th></tr></thead><tbody>' +
+      tr('Curve + mechanism (used)', x(F.looFit, 2), pc(F.within3), 'tot') + tr('Curve alone', x(F.looCurve, 2), pc(F.within3Curve)) + tr('One flat mcap/TVL', x(F.looFlat, 2), pc(F.within3Flat)) +
+      tr('Time split: fit ' + F.split.nTrain + ' older, price ' + F.split.nTest + ' newer', x(F.split.fit, 2), pc(F.split.cover50) + ' in 50% band') + tr('Time split, flat multiple', x(F.split.flat, 2), pc(F.split.cover80) + ' in 80% band') +
+      '</tbody></table><p class="note">Rank correlation of blind price and real cap: ' + F.spearman.toFixed(2) + '. Shaded: within 3× of the real cap. Colour: mechanism. Each dot is priced by a fit that never saw it.</p></section></div></div>';
     return h;
   }
 
   function simple(kind) {
     const isT = kind === 'trades', list = isT ? R0.trades : R0.aside;
-    let h = '<p class="note">' + (isT ? 'Protocols whose token already trades, joined into token families. They are the comps the board is priced on and are never ranked on it: their value is the market\'s, not the model\'s.' : 'Pre-token records the board does not rank, each with the rule that set it aside. The watchlist is never set aside; sibling products are folded into one launch.') + '</p><div class="grid" style="margin-top:10px"><table><thead><tr>' +
+    let h = '<p class="note">' + (isT ? 'Tokens that already trade, joined into families: the comps the board is priced on, never ranked on it.' : 'Pre-token records the board does not rank, each with the rule that set it aside. The watchlist is never set aside.') + '</p><div class="grid" style="margin-top:10px"><table><thead><tr>' +
       (isT ? '<th>Token family</th><th>Ticker</th><th>Category</th><th class="n">Records</th><th class="n">TVL</th><th class="n">Market cap</th><th class="n">mcap / TVL</th><th>Comp</th>' : '<th>Protocol</th><th>Category</th><th class="n">TVL</th><th>Why it is not ranked</th>') + '</tr></thead><tbody>';
     for (const t of list) h += isT
       ? '<tr><td><b>' + esc(t.name) + '</b></td><td class="mono">' + esc(t.symbol || '') + '</td><td>' + esc(t.cat || '') + '</td><td class="n">' + t.members + '</td><td class="n">' + usd(t.tvl) + '</td><td class="n">' + usd(t.mcap) + '</td><td class="n mono">' + x(t.mcap / t.tvl) + '</td><td>' + (t.comp ? '<span class="pos">yes</span>' : '<span class="dim">no</span>') + '</td></tr>'
@@ -202,12 +213,6 @@
     if (tr) location.hash = '#/p/' + tr.dataset.p;
   });
   $('app').addEventListener('change', (e) => { if (e.target.dataset.k) set(e.target.dataset.k, e.target.value.trim()); });
-  $('app').addEventListener('input', (e) => {
-    if (!e.target.dataset.lever) return;
-    const k = {};
-    document.querySelectorAll('[data-lever]').forEach((i) => { k[i.dataset.lever] = Number(i.value); $('lv-' + i.dataset.lever).textContent = i.value; });
-    $('labout').innerHTML = labOut(M.build(S, k));
-  });
   window.addEventListener('hashchange', render);
   render();
 })();

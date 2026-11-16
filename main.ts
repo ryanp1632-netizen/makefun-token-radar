@@ -78,7 +78,7 @@ const board = {
   source: snapshot.source,
   comps: {
     n: radar.fit.n, a: r2(radar.fit.a), b: r2(radar.fit.b), sigma_log10: r2(radar.fit.sigma), loo_error_x: r2(radar.fit.looFit), flat_error_x: r2(radar.fit.looFlat),
-    spearman: r2(radar.fit.spearman), within_3x: r2(radar.fit.within3), within_3x_flat: r2(radar.fit.within3Flat), band50_x: r2(10 ** radar.fit.band50), band80_x: r2(10 ** radar.fit.band80),
+    spearman: r2(radar.fit.spearman), curve_only_error_x: r2(radar.fit.looCurve), factor_check_r: { growth: r2(radar.fit.rC7), age: r2(radar.fit.rAge) }, within_3x: r2(radar.fit.within3), within_3x_flat: r2(radar.fit.within3Flat), band50_x: r2(10 ** radar.fit.band50), band80_x: r2(10 ** radar.fit.band80),
     time_split: { cut: radar.fit.split.cut, train: radar.fit.split.nTrain, test: radar.fit.split.nTest, error_x: r2(radar.fit.split.fit), flat_error_x: r2(radar.fit.split.flat), cover50: r2(radar.fit.split.cover50), cover80: r2(radar.fit.split.cover80) },
   },
   rows: rows.map((r) => ({
@@ -88,11 +88,11 @@ const board = {
     products: r.products.map((p: { slug: string }) => p.slug), change_7d: r.change_7d, listed_at: r.listed_at, days_without_token: r.age_days,
     factors: { comps_multiple: r2(r.multiple), growth: r2(r.growth_factor), age: r2(r.age_factor), sibling: r.sibling_factor },
     airdrop_per_1k_usd: r2(r.drop_per_1k),
-    implied_p10_p90_usd: [r.p10_usd, r.p90_usd],
+    implied_p10_p90_usd: [r.p10_usd, r.p90_usd], rank_p10_p90_over_refits: [r.rank_lo, r.rank_hi],
     farm: {
       chain: r.plan.chain, capital_usd: r.plan.ticket, hold_days: r.plan.hold, hands_on_minutes: r.plan.minutes,
       slice_usd: r2(r.plan.slice), fees_usd: r2(r.plan.fees), tbill_forgone_usd: r2(r.plan.forgone), net_usd: r2(r.plan.net),
-      net_per_hour_usd: r2(r.plan.perHour), pays_from_usd: r.plan.paysFrom, verdict: r.plan.verdict,
+      net_per_hour_usd: r2(r.plan.perHour), pays_from_usd: r.plan.paysFrom, breakeven_launch_odds: r2(r.plan.odds), verdict: r.plan.verdict,
     },
     farm_steps: r.plan.text,
   })),
@@ -117,6 +117,7 @@ if (shots.length < 3) fail(`screenshots/ holds ${shots.length} images: hand in t
 
 const dossier = buildDossier(out, { text_max_bytes: 65_536, screenshots: { max: 4, max_bytes: 524_288 }, dashboard: { max_files: 400, max_bytes: 4_194_304 } });
 if (dossier.length > 1_572_864) fail(`dossier.json is ${dossier.length} bytes; the gate takes 1.5 MiB: shrink the screenshots`);
+if (/\[Cut at \d+ bytes/.test(JSON.parse(new TextDecoder().decode(dossier)).text)) fail('the dashboard source passes 64 KB, so the judge would read it cut: trim it');
 writeFileSync(join(out, 'dossier.json'), dossier);
 
 const tiers = (t: string) => rows.filter((r) => r.tier === t).length;
