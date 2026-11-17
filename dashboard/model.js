@@ -1,11 +1,10 @@
-/* Launch Radar model. One file, run twice: main.ts loads it (node:vm) to write board.json, and the page
-   loads it to draw the board. The page re-runs build() on the raw snapshot and checks every rank and value
-   against board.json, so what the screenshots show is what this code computes. No protocol is named here. */
+/* Launch Radar model: main.ts runs it (node:vm) to write board.json; the page re-runs build() on the raw snapshot
+   and verifyBoard() checks every row against board.json. No protocol is named here. */
 (function (root) {
   'use strict';
   const DAY = 864e5;
 
-  // Every lever the model has. The Model tab shows them; nothing else is tuned by hand.
+  // Every lever the model has; nothing else is tuned by hand.
   const K = {
     growthWeight: 0.5, growthFloor: -40, growthCap: 60, // half of a week's TVL move is assumed to stick
     ageFloor: 0.55, ageFullDays: 730, ageUnknownDays: 365, // young TVL is mercenary: full credit after 2y
@@ -259,14 +258,15 @@
     const gas = GAS[chain] ?? 0.25, C = k.capital, young = r.age_days !== null && r.age_days < 180;
     const hold = young ? 90 : r.age_days !== null && r.age_days < 365 ? 60 : 45, weeks = Math.round(hold / 7);
     const n = r.name, $C = '$' + C.toLocaleString('en-US'), pb = playbook(r, n, C, chain);
+    const cut = Math.round(clamp(2 * Math.abs(r.change_7d || 0), 10, 40)), stop = Math.round(r.launch_tvl_usd * (1 - cut / 100) / 1e5) * 1e5, $S = '$' + (stop >= 1e9 ? (stop / 1e9).toFixed(2) + 'B' : (stop / 1e6).toFixed(1) + 'M');
     const S = (name, after, text, usd, cost, min, time) => ({ name, after, do: text, usd, cost, min, time });
     const steps = [
       S('Fund', 0, 'Make a fresh wallet for ' + n + ' and withdraw ' + $C + ' of ' + (chain === 'Bitcoin' ? 'BTC' : chain === 'Tron' ? 'USDT' : 'USDC') + ' plus a small fee float straight from an exchange to ' + chain + (chain === r.chains[0] ? '' : ', the lowest-fee of the three chains where it holds most TVL') + '.', 1, 'about $1 withdrawal fee', 15, '15 min'),
       S('Position', 0, pb.act, gas * pb.tx, pb.tx + ' transactions, ' + money(gas * pb.tx), pb.min, pb.min + ' min'),
-      S('Track', 0, 'Open ' + n + "'s points or rewards page from its official site (check the contracts and audits it links), link this wallet if it asks, and note the starting balance.", 0, 'free: a signature, not a transaction', 10, '10 min'),
+      S('Track', 0, 'Open ' + n + "'s points or rewards page from its official site (check the contracts and audits it links, and that your country and any KYC are accepted), link this wallet if it asks, and note the starting balance.", 0, 'free: a signature, not a transaction', 10, '10 min'),
       S('Upkeep', 0, 'Once a week, ' + pb.weekly + ", and log the points balance; skip a week when its fee would exceed a tenth of that week's points.", gas * weeks, money(gas) + ' a week, ' + money(gas * weeks) + ' over ' + weeks + ' weeks', 10 * weeks, '10 min a week'),
       S('Hold', 0, 'Keep the deposit in for ' + hold + ' days' + (r.age_days === null ? '' : ': ' + n + ' has run ' + fmtAge(r.age_days) + ' with no token, and drops usually weigh how long capital stayed') + '.', 0, money((C * k.tbill * hold) / 365) + ' of forgone ' + k.tbill * 100 + "% T-bill yield (the position's own yield is upside)", 0, hold + ' days'),
-      S('Guard', 0, pb.guard + ' Also exit if TVL falls more than 25% in a week on DefiLlama.', 0, 'exit ' + money(gas * 2) + ' if it fires (' + pb.exit + ')', 0, 'inside the weekly visit'),
+      S('Guard', 0, pb.guard + ' Stop rule: exit at once if ' + n + "'s TVL on DefiLlama closes under " + $S + ' (' + cut + '% under today, twice its 7-day swing) or withdrawals pause.', 0, 'exit ' + money(gas * 2) + ' if it fires (' + pb.exit + ')', 0, 'inside the weekly visit'),
       S('Claim', 1, 'When a token is announced, claim only from the link on ' + n + "'s official site or account, never from a DM or an ad; sell enough at launch to repay this plan's fees, then decide on the rest.", gas * 2, 'claim and one sale, ' + money(gas * 2), 20, '20 min on launch day'),
       S('Unwind', 1, 'Withdraw once the claim is done, or after ' + hold + " days if no points program is announced; revoke this wallet's approvals and move the deposit to the next row worth farming.", gas * 3, 'withdraw and revoke, ' + money(gas * 3), 15, '15 min'),
     ];
@@ -278,7 +278,7 @@
     // The slice is paid only if a token launches. Break-even odds: the launch chance at which the plan pays its way.
     const odds = (fees + forgone) / slice;
     return {
-      chain, gas, ticket: C, hold, steps, fees, forgone, slice, net, minutes, perHour: net / (minutes / 60), perDollar, carry, odds,
+      chain, gas, ticket: C, hold, stop, cut, weeks, steps, fees, forgone, slice, net, minutes, perHour: net / (minutes / 60), perDollar, carry, odds,
       paysFrom: perDollar > carry ? Math.ceil(fees / (perDollar - carry) / 10) * 10 : null, // the smallest deposit that nets above zero
       verdict: odds <= 0.5 ? 'Farm' : odds <= 1 ? 'Thin edge' : 'Skip',
       text: steps.map((x) => (x.after ? 'After the token, ' : 'Before the token, ') + x.name.toLowerCase() + ' (' + x.when + '): ' + x.do + ' Cost: ' + x.cost + '. Time: ' + x.time + '.'),

@@ -92,7 +92,7 @@ const board = {
     farm: {
       chain: r.plan.chain, capital_usd: r.plan.ticket, hold_days: r.plan.hold, hands_on_minutes: r.plan.minutes,
       slice_usd: r2(r.plan.slice), fees_usd: r2(r.plan.fees), tbill_forgone_usd: r2(r.plan.forgone), net_usd: r2(r.plan.net),
-      net_per_hour_usd: r2(r.plan.perHour), pays_from_usd: r.plan.paysFrom, breakeven_launch_odds: r2(r.plan.odds), verdict: r.plan.verdict,
+      net_per_hour_usd: r2(r.plan.perHour), stop_tvl_usd: r.plan.stop, pays_from_usd: r.plan.paysFrom, breakeven_launch_odds: r2(r.plan.odds), verdict: r.plan.verdict,
     },
     farm_steps: r.plan.text,
   })),
@@ -101,8 +101,9 @@ const board = {
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), JSON.stringify(board) + '\n');
-// The page gets the raw snapshot and board.json's [slug, rank, value] triples, and checks one against the other.
-writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\nwindow.BOARD=${JSON.stringify(rows.map((r) => [r.slug, r.rank, r.implied_value_usd]))};\n`);
+// The page gets the raw snapshot and, from board.json, each row's slug, rank, value, 50% band, rank range, verdict and
+// net in cents; verifyBoard() in app.js re-derives all of them and the badge counts the rows that match.
+writeFileSync(join(out, 'data.js'), `window.SNAPSHOT=${JSON.stringify(snapshot)};\nwindow.BOARD=${JSON.stringify(rows.map((r) => [r.slug, r.rank, r.implied_value_usd, r.low_usd, r.high_usd, r.rank_lo, r.rank_hi, r.plan.verdict, Math.round(r.plan.net * 100)]))};\n`);
 
 function copyFiles(from: string, to: string): string[] {
   if (!existsSync(from)) return [];

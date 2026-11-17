@@ -1,6 +1,6 @@
 // Screenshots of the built dashboard with headless Chrome over the DevTools protocol (no npm packages).
 //   node tools/shoot.mjs <output dir that main.ts wrote> <screenshots dir> [chrome.exe]
-// Each shot is a hash route of out/dashboard/index.html, captured at 1440 px wide as JPEG, kept under 270 KB so four fit the 1.5 MiB dossier.
+// Each shot is a hash route of out/dashboard/index.html, captured at 1440 px wide as JPEG, kept under 340 KB so three fit the 1.5 MiB dossier.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,11 +9,10 @@ import { pathToFileURL } from 'node:url';
 
 const [outDir, shotDir, chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'] = process.argv.slice(2);
 const SHOTS = [
-  ['1-board.jpg', '#/board', 1000],
-  ['2-detail.jpg', '#/p/' + (process.env.DETAIL || 'figure-markets-prime'), 1280],
-  ['3-filtered.jpg', '#/board?tier=early&s=odds', 1000],
-  ['4-model.jpg', '#/model', 820],
-].slice(0, Number(process.env.SHOTS || 4));
+  ['1-board.jpg', '#/board', 1100],
+  ['2-detail.jpg', '#/p/' + (process.env.DETAIL || 'figure-markets-prime'), 1440],
+  ['3-filtered.jpg', '#/board?t=pre&v=Farm&s=hour', 1000],
+];
 
 const port = 9300 + Math.floor(Math.random() * 500);
 const profile = mkdtempSync(join(tmpdir(), 'radar-shot-'));
@@ -43,7 +42,7 @@ for (const [name, hash, height] of SHOTS) {
   do {
     data = Buffer.from((await send('Page.captureScreenshot', { format: 'jpeg', quality: q, captureBeyondViewport: false })).result.data, 'base64');
     q -= 4;
-  } while (data.length > 270_000 && q > 50);
+  } while (data.length > 340_000 && q > 50);
   writeFileSync(join(shotDir, name), data);
   console.log(`${name}: ${hash} ${(data.length / 1024).toFixed(0)} KB q${q + 4} ${evald.result?.result?.value}`);
 }
